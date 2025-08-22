@@ -1,5 +1,6 @@
 import time
 import heapq
+from nn_policy import NeuralNet
 
 min_slice = 100
 
@@ -47,14 +48,17 @@ class Scheduler:
         task.vruntime = max(task.vruntime, self.min_vruntime)
         heapq.heappush(self.queue, task)
 
+    def __enqueue_task(self, task):
+        burst_length = self.global_tick_time - task.exec_start
+        task.total_burst_time += burst_length
+        task.avg_burst_time = task.total_burst_time / task.burst_count
+        self.calculate_vruntime(task)
+        heapq.heappush(self.queue, task)
+
     def put_curr_task(self):
         if self.running_task:
-            burst_length = self.global_tick_time - self.running_task.exec_start
-            self.running_task.total_burst_time += burst_length
-            self.running_task.avg_burst_time = self.running_task.total_burst_time / self.running_task.burst_count
-            self.calculate_vruntime(self.running_task)
-            heapq.heappush(self.queue, self.running_task)
-            print(f"Task: {self.running_task.pid} finished burst {burst_length} | Avg burst time: {self.running_task.avg_burst_time} | Avg wait time: {self.running_task.avg_wait_time}")
+            self.__enqueue_task(self.running_task) 
+            print(f"Task: {self.running_task.pid} finished burst | Avg burst time: {self.running_task.avg_burst_time} | Avg wait time: {self.running_task.avg_wait_time}")
             self.running_task = None
 
     def set_task(self, task):
