@@ -136,7 +136,7 @@ class Scheduler:
             if self.running_task:
                 self.update_curr(self.running_task)
                 burst_time = self.global_tick_time - self.running_task.burst_start_time
-                if((self.running_task.resched and burst_time > min_slice) or (burst_time >= self.running_task.max_burst_time)):
+                if((self.running_task.resched and burst_time > min_slice) or (burst_time >= self.running_task.max_burst_time)  or (self.queue[0].deadline < self.running_task.deadline)):
                         self.set_task(heapq.heappop(self.queue))
             else:
                 if self.queue:
@@ -168,7 +168,7 @@ class Task:
         self.action = 0
 
     def __lt__(self, other):
-        return self.vruntime < other.vruntime
+        return self.deadline < other.deadline
 
 
 def main():
