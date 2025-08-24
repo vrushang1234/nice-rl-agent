@@ -26,11 +26,12 @@ class NeuralNet:
         self.b1 = np.zeros((hidden_size, 1), dtype=np.float32)
         self.W2 = np.random.uniform(-0.01, 0.01, (output_size, hidden_size)).astype(np.float32)
         self.b2 = np.zeros((output_size, 1), dtype=np.float32)
+        self.probs = []
         self.baseline = 0.0  
     # Forward Propogation   
     def forward(self, state):
         self.z1 = np.dot(self.W1, state) + self.b1
-        self.a1 = ReLU(self.z1)
+        self.a1 = np.tanh(self.z1)
         self.z2 = np.dot(self.W2, self.a1) + self.b2
         self.probs = softmax(self.z2)
         return self.probs
@@ -39,7 +40,8 @@ class NeuralNet:
     # I am doing this for now so that the RL explores all the choices, cruical for training it
     def select_action(self, state):
         probs = self.forward(state)
-        action_idx = np.random.choice(len(probs), p=probs.ravel())
+        probs_1d = probs.ravel()
+        action_idx = np.random.choice(len(probs_1d), p=probs_1d) 
         nice_value = action_idx - 5
         return action_idx, nice_value
 
