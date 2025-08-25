@@ -78,16 +78,16 @@ class Scheduler:
             task.deadline = task.vruntime + self.calc_delta_fair(BASE_SLICE, task)
         task.wait_time_before = self.global_tick_time
         task.wait_time_count += 1
-        # (action, nice) = self.agent.policy_decide([task.avg_burst_time, task.avg_wait_time])
-        # task.nice = nice
-        # task.action = action
+        (action, nice) = self.agent.policy_decide([task.avg_burst_time, task.avg_wait_time])
+        task.nice = nice
+        task.action = action
         task.vruntime = max(task.vruntime, self.min_vruntime)
         heapq.heappush(self.queue, task)
 
     def __enqueue_task(self, task):
-        # (action,nice) = self.agent.policy_decide([task.avg_burst_time, task.avg_wait_time])
-        # task.nice = nice
-        # task.action = action
+        (action,nice) = self.agent.policy_decide([task.avg_burst_time, task.avg_wait_time])
+        task.nice = nice
+        task.action = action
 
         task.vruntime = max(task.vruntime, self.min_vruntime)
         heapq.heappush(self.queue, task)
@@ -111,7 +111,7 @@ class Scheduler:
             burst_length = self.global_tick_time - self.running_task.burst_start_time
             self.running_task.total_burst_time += burst_length
             self.running_task.avg_burst_time = self.running_task.total_burst_time / self.running_task.burst_count
-            # self.agent.calculate_reward([self.running_task.avg_burst_time, self.running_task.avg_wait_time], self.running_task.action)
+            self.agent.calculate_reward([self.running_task.avg_burst_time, self.running_task.avg_wait_time], self.running_task.action)
             if self.running_task.sleep_time > 0:
                 self.running_task.sleep_left = self.running_task.sleep_time
                 self.sleep_queue.append(self.running_task)
