@@ -11,6 +11,8 @@ class ValueFunction:
         self.OUTPUT_SIZE = 1
         self.DISCOUNT_FACTOR = 0.9
         self.GAE_PARAM = 0.95
+        self.LEARNING_RATE = 3e-4
+        self.v_old = None
         self.w1 = np.random.randn(self.HIDDEN_LAYER_SIZE, self.INPUT_SIZE) * np.sqrt(2.0 / self.INPUT_SIZE)
         self.b1 = np.zeros(self.HIDDEN_LAYER_SIZE)
         self.w2 = np.random.randn(self.OUTPUT_SIZE, self.HIDDEN_LAYER_SIZE) * np.sqrt(2.0 / self.HIDDEN_LAYER_SIZE)
@@ -26,21 +28,27 @@ class ValueFunction:
         a2 = float(z2[0])
         return a2
 
+    def set_v_old(self, states):
+        self.v_old = [self.forward(s) for s in states]
+
     # We are given env_params that is a list of n states and their rewards of tuples: [(state,reward)]
-    def calculate_delta(self, env_params):
-        v_t_list = [self.forward(env_params[0][0])] * len(env_params)
-        delta_list = [0] * len(env_params)
-        for i in range(len(env_params)-1):
-            v_t_list[i+1] = self.forward(env_params[i+1][0])
-            y_t = env_params[i][1] + self.DISCOUNT_FACTOR * v_t_list[i+1]
-            delta_list[i] = y_t - v_t_list[i]
-        delta_list[-1] = env_params[-1][1] - v_t_list[-1]
+    def calculate_delta_and_loss(self, env_params):
+        if self.v_old is None:
+            raise ValueError("v_old not set. Call set_v_old(states_0_to_T) before training.")
+        n = len(env_params)
+        if len(self.v_old) != n + 1:
+            raise ValueError("v_old length must be len(env_params)+1 (need s_T for bootstrap).")
+        delta_list = [0] * n
+
+        for i in range(n):
+            y_t = env_params[i][1] + self.DISCOUNT_FACTOR * self.v_old[i+1]
+            delta_list[i] = y_t - self.v_old[i]
         return delta_list
 
 
     # We are given env_params that is a list of n states and their rewards of tuples: [(state,reward)]
     def update(self,env_params):
-        delta_list = self.calculate_delta(env_params)
+        delta_list = self.calculate_delta_and_loss(env_params)
         prod = self.DISCOUNT_FACTOR * self.GAE_PARAM
         adv_0 = 0
         for i in range(len(delta_list)):
@@ -48,7 +56,27 @@ class ValueFunction:
         adv_list = [adv_0]
         for i in range(1,len(delta_list)):
             adv_list.append((adv_list[i-1] - delta_list[i-1])/prod)
-        
-
-        #TODO: Update the parameters with loss and update the policy with adv
-
+        grad_w1 = np.zeros_like(self.w1)
+        grad_b1 = np.zeros_like(self.b1)
+        grad_w2 = np.zeros_like(self.w2)
+        grad_b2 = np.zeros_like(self.b2)
+            
+        n = len(env_params)
+        for t in range(n):
+            state_t, reward_t = env_params[t]
+            z1 = self.w1 @ state_t + self.b1
+            a1 = ReLU(z1)
+            v_t = float(self.w2 @ a1 + self.b2)
+            y_t = reward_t + self.DISCOUNT_FACTOR * self.v_old[t+1]
+            dL_dv = 2.0 * (v_t - y_t)
+            grad_w2 += dL_dv * a1[None, :]
+            grad_b2 += dL_dv
+            relu_mask = (z1 > 0).astype(z1.dtype)
+            dz1 = dL_dv * (self.w2[0] * relu_mask)
+            grad_w1 += np.outer(dz1, state_t)
+            grad_b1 += dz1
+        grad_w1 /= n; grad_b1 /= n; grad_w2 /= n; grad_b2 /= n
+        self.w1 -= self.LEARNING_RATE * grad_w1
+        self.b1 -= self.LEARNING_RATE * grad_b1
+        self.w2 -= self.LEARNING_RATE * grad_w2
+        self.b2 -= self.LEARNING_RATE * grad_b2
