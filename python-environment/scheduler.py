@@ -112,7 +112,7 @@ class Scheduler:
             output = self.agent.rl_policy_decide(self.last_state)
             action = np.argmax(output)
             self.last_action = action
-            task.nice = nice_weights[nice_actions[action]]
+            task.nice = nice_actions[action]
         task.vruntime = max(task.vruntime, self.min_vruntime)
         heapq.heappush(self.queue, task)
         task.wait_time_before = self.global_tick_time
@@ -133,6 +133,14 @@ class Scheduler:
         if self.running_task:
             reward = self.agent.calculate_reward([self.running_task.avg_wait_time, self.running_task.avg_burst_time, self.avg_wait_time, self.avg_burst_time])
             self.steps.append((self.last_state, reward, self.last_action))
+            if(len(self.steps) == 50):
+                if(self.queue):
+                    task = self.queue[0]
+                else:
+                    task = self.sleep_queue[0]
+                self.last_state = [task.last_wait_time, task.avg_wait_time, task.last_burst_time, task.avg_burst_time, task.vruntime, task.sum_exec_runtime, self.avg_wait_time, self.avg_burst_time]
+                self.agent.train_for_fifty_epochs(self.steps,self.last_state)
+                self.steps = []
             self.last_state = []
             self.last_action = -1
             self.running_task.resched = False
