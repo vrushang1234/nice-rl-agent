@@ -12,7 +12,7 @@ class ValueFunction:
         self.DISCOUNT_FACTOR = 0.9
         self.GAE_PARAM = 0.95
         self.LEARNING_RATE = 3e-4
-        self.v_old = None
+        self.epsilon = 0.2
         self.w1 = np.random.randn(self.HIDDEN_LAYER_SIZE, self.INPUT_SIZE) * np.sqrt(2.0 / self.INPUT_SIZE)
         self.b1 = np.zeros(self.HIDDEN_LAYER_SIZE)
         self.w2 = np.random.randn(self.OUTPUT_SIZE, self.HIDDEN_LAYER_SIZE) * np.sqrt(2.0 / self.HIDDEN_LAYER_SIZE)
@@ -45,17 +45,18 @@ class ValueFunction:
             delta_list[i] = y_t - self.v_old[i]
         return delta_list
 
-
-    # We are given env_params that is a list of n states and their rewards of tuples: [(state,reward)]
-    def update(self,env_params):
+    # We are given env_params that is a list of n states and their rewards of tuples: [(state,reward)] and probability ratios list r_t
+    def update(self,env_params,r_t):
         delta_list = self.calculate_delta_and_loss(env_params)
-        prod = self.DISCOUNT_FACTOR * self.GAE_PARAM
-        adv_0 = 0
-        for i in range(len(delta_list)):
-            adv_0 += delta_list[i] * pow(prod,i)
-        adv_list = [adv_0]
-        for i in range(1,len(delta_list)):
-            adv_list.append((adv_list[i-1] - delta_list[i-1])/prod)
+        gamma, lam = self.DISCOUNT_FACTOR, self.GAE_PARAM
+        T = len(delta_list)
+        A = np.zeros(T, dtype=np.float64)
+        gae = 0.0
+        for t in range(T-1, -1, -1):
+            gae = delta_list[t] + gamma * lam * gae
+            A[t] = gae
+        A = (A - A.mean()) / (A.std() + 1e-8)
+
         grad_w1 = np.zeros_like(self.w1)
         grad_b1 = np.zeros_like(self.b1)
         grad_w2 = np.zeros_like(self.w2)
@@ -80,3 +81,7 @@ class ValueFunction:
         self.b1 -= self.LEARNING_RATE * grad_b1
         self.w2 -= self.LEARNING_RATE * grad_w2
         self.b2 -= self.LEARNING_RATE * grad_b2
+        policy_loss_sum = 0
+        for t in range(len(A)):
+            policy_loss_sum += np.minimum(r_t[t]*A[t], np.clip(r_t[t], 1 - self.epsilon, 1 + self.epsilon) * A[t])
+        return -policy_loss_sum / len(A)
