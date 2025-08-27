@@ -34,3 +34,11 @@ class RLAgent:
             output = self.rl_policy_decide(states[i])
             r_t[i] = np.exp(np.log(output[self.old_pi[i][0]] + eps) - np.log(self.old_pi[i][1] + eps))
         return r_t
+    
+    def calculate_reward(self, state):
+        wait_time = -0.4
+        burst_time = 0.1
+        avg_wait_time_diff = -0.25
+        avg_burst_time_diff = -0.25
+        reward = state[0] * wait_time + state[1] * burst_time + (state[2] - state[0]) * avg_wait_time_diff + (state[3] - state[1]) * avg_burst_time_diff 
+        return reward

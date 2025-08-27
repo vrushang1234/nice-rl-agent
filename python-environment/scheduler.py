@@ -1,7 +1,11 @@
 import heapq
+import numpy as np
+
 from rl_agent import RLAgent
 
 min_slice = 50
+
+nice_actions = [-5,-4,-3,-2,-1,0,1,2,3,4,5]
 
 nice_weights = {
     -5: 3121,
@@ -21,13 +25,19 @@ BASE_SLICE = 3000
 
 class Scheduler:
     def __init__(self):
-        self.agent = RLAgent()
         self.running_task = None
         self.queue = []
         self.sleep_queue = []
         heapq.heapify(self.queue)
         self.min_vruntime = 0
         self.global_tick_time = 0
+        self.avg_wait_time = 0
+        self.avg_burst_time = 0
+        self.agent = RLAgent()
+        self.agent_params = []
+        self.last_state = []
+        self.last_action = -1
+        self.steps = []
 
     def update_curr_se(self, task):
         now = self.global_tick_time
@@ -78,17 +88,31 @@ class Scheduler:
             task.deadline = task.vruntime + self.calc_delta_fair(BASE_SLICE, task)
         task.wait_time_before = self.global_tick_time
         task.wait_time_count += 1
-        (action, nice) = self.agent.policy_decide([task.avg_burst_time, task.avg_wait_time])
-        task.nice = nice
-        task.action = action
         task.vruntime = max(task.vruntime, self.min_vruntime)
         heapq.heappush(self.queue, task)
 
     def __enqueue_task(self, task):
-        (action,nice) = self.agent.policy_decide([task.avg_burst_time, task.avg_wait_time])
-        task.nice = nice
-        task.action = action
+        for queue_task in self.queue:
+            self.avg_wait_time += queue_task.avg_wait_time 
+            self.avg_burst_time += queue_task.avg_burst_time
+        for queue_task in self.sleep_queue:
+            self.avg_wait_time += queue_task.avg_wait_time 
+            self.avg_burst_time += queue_task.avg_burst_time
+        if self.running_task:
+            self.avg_wait_time += self.running_task.avg_wait_time
+            self.avg_wait_time /= len(self.queue) + len(self.sleep_queue) + 1 
+            self.avg_burst_time += self.running_task.avg_burst_time
+            self.avg_burst_time /= len(self.queue) + len(self.sleep_queue) + 1
+        else:
+            self.avg_wait_time /= len(self.queue) + len(self.sleep_queue)
+            self.avg_burst_time /= len(self.queue) + len(self.sleep_queue)
 
+        if self.last_state == [] and self.last_action == -1:
+            self.last_state = [task.last_wait_time, task.avg_wait_time, task.last_burst_time, task.avg_burst_time, task.vruntime, task.sum_exec_runtime, self.avg_wait_time, self.avg_burst_time]
+            output = self.agent.rl_policy_decide(self.last_state)
+            action = np.argmax(output)
+            self.last_action = action
+            task.nice = nice_weights[nice_actions[action]]
         task.vruntime = max(task.vruntime, self.min_vruntime)
         heapq.heappush(self.queue, task)
         task.wait_time_before = self.global_tick_time
@@ -107,11 +131,15 @@ class Scheduler:
 
     def put_curr_task(self):
         if self.running_task:
+            reward = self.agent.calculate_reward([self.running_task.avg_wait_time, self.running_task.avg_burst_time, self.avg_wait_time, self.avg_burst_time])
+            self.steps.append((self.last_state, reward, self.last_action))
+            self.last_state = []
+            self.last_action = -1
             self.running_task.resched = False
             burst_length = self.global_tick_time - self.running_task.burst_start_time
             self.running_task.total_burst_time += burst_length
+            self.running_task.last_burst_time = burst_length
             self.running_task.avg_burst_time = self.running_task.total_burst_time / self.running_task.burst_count
-            self.agent.calculate_reward([self.running_task.avg_burst_time, self.running_task.avg_wait_time], self.running_task.action)
             if self.running_task.sleep_time > 0:
                 self.running_task.sleep_left = self.running_task.sleep_time
                 self.sleep_queue.append(self.running_task)
@@ -123,6 +151,7 @@ class Scheduler:
         if self.running_task is not None:
             self.put_curr_task()
         task.total_wait_time += self.global_tick_time - task.wait_time_before
+        task.last_wait_time = self.global_tick_time - task.wait_time_before
         task.avg_wait_time = task.total_wait_time / task.wait_time_count
         self.running_task = task
         self.running_task.exec_start = self.global_tick_time
@@ -147,18 +176,21 @@ class Task:
     def __init__(self, pid, nice, max_burst_time, sleep_time):
         self.pid = pid
         self.vruntime = 0
-        self.burst_start_time = 0
         self.deadline = 0
+        self.sum_exec_runtime = 0
+
+        self.burst_start_time = 0
         self.max_burst_time = max_burst_time
         self.avg_burst_time = 0
         self.burst_count = 0
         self.total_burst_time = 0
-        self.sum_exec_runtime = 0
+        self.last_burst_time = 0
 
         self.avg_wait_time = 0
         self.wait_time_before = 0
         self.total_wait_time = 0
         self.wait_time_count = 0
+        self.last_wait_time = 0
 
         self.sleep_time = sleep_time
         self.sleep_left = 0
