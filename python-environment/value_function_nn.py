@@ -31,7 +31,7 @@ class ValueFunction:
     def set_v_old(self, states):
         self.v_old = [self.forward(s) for s in states]
 
-    # We are given env_params that is a list of n states and their rewards of tuples: [(state,reward)]
+    # We are given env_params that is a list of n states and their rewards of tuples: [(state,reward,action)]
     def calculate_delta_and_loss(self, env_params):
         if self.v_old is None:
             raise ValueError("v_old not set. Call set_v_old(states_0_to_T) before training.")
@@ -45,7 +45,7 @@ class ValueFunction:
             delta_list[i] = y_t - self.v_old[i]
         return delta_list
 
-    # We are given env_params that is a list of n states and their rewards of tuples: [(state,reward)] and probability ratios list r_t
+    # We are given env_params that is a list of n states and their rewards of tuples: [(state,reward,action)] and probability ratios list r_t
     def update(self,env_params,r_t):
         delta_list = self.calculate_delta_and_loss(env_params)
         gamma, lam = self.DISCOUNT_FACTOR, self.GAE_PARAM
@@ -57,6 +57,13 @@ class ValueFunction:
             A[t] = gae
         A = (A - A.mean()) / (A.std() + 1e-8)
 
+        r = np.asarray(r_t, dtype=np.float64)
+        eps = self.epsilon
+        unclipped_pos = (A >= 0) & (r <= 1.0 + eps)
+        unclipped_neg = (A < 0)  & (r >= 1.0 - eps)
+        mask = (unclipped_pos | unclipped_neg).astype(np.float64)
+        g = -(A * r * mask) / T
+
         grad_w1 = np.zeros_like(self.w1)
         grad_b1 = np.zeros_like(self.b1)
         grad_w2 = np.zeros_like(self.w2)
@@ -64,11 +71,11 @@ class ValueFunction:
             
         n = len(env_params)
         for t in range(n):
-            state_t, reward_t = env_params[t]
+            state_t, reward_t,_ = env_params[t]
             z1 = self.w1 @ state_t + self.b1
             a1 = ReLU(z1)
             v_t = float(self.w2 @ a1 + self.b2)
-            y_t = reward_t + self.DISCOUNT_FACTOR * self.v_old[t+1]
+            y_t = reward_t + gamma * self.v_old[t+1]
             dL_dv = 2.0 * (v_t - y_t)
             grad_w2 += dL_dv * a1[None, :]
             grad_b2 += dL_dv
@@ -84,4 +91,4 @@ class ValueFunction:
         policy_loss_sum = 0
         for t in range(len(A)):
             policy_loss_sum += np.minimum(r_t[t]*A[t], np.clip(r_t[t], 1 - self.epsilon, 1 + self.epsilon) * A[t])
-        return -policy_loss_sum / len(A)
+        return -policy_loss_sum / len(A),g
