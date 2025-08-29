@@ -68,10 +68,10 @@ class ValueFunction:
         grad_b1 = np.zeros_like(self.b1)
         grad_w2 = np.zeros_like(self.w2)
         grad_b2 = np.zeros_like(self.b2)
-            
+
         n = len(env_params)
         for t in range(n):
-            state_t, reward_t,_ = env_params[t]
+            state_t, reward_t,_,_ = env_params[t]
             z1 = self.w1 @ state_t + self.b1
             a1 = ReLU(z1)
             v_t = float(self.w2 @ a1 + self.b2)
