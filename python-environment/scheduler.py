@@ -25,7 +25,7 @@ BASE_SLICE = 3000
 
 
 class Scheduler:
-    def __init__(self):
+    def __init__(self, rl_enabled=True,test=False):
         self.running_task = None
         self.queue = []
         self.sleep_queue = []
@@ -34,11 +34,21 @@ class Scheduler:
         self.global_tick_time = 0
         self.avg_wait_time = 0
         self.avg_burst_time = 0
-        self.agent = RLAgent()
+        self.agent = RLAgent(test) if rl_enabled else None
         self.last_state = []
         self.last_action = -1
         self.last_action_prob = None
         self.steps = []
+        self.train_count = 0
+        self.turnaround_sum = 0
+        self.finished_count = 0
+        self.rl_enabled = rl_enabled
+        self.test = test
+
+    def record_turnaround(self,task):
+        time = task.total_wait_time + task.sum_exec_runtime
+        self.turnaround_sum += float(time)
+        self.finished_count += 1
 
     def update_curr_se(self, task):
         now = self.global_tick_time
@@ -151,50 +161,49 @@ class Scheduler:
 
     def put_curr_task(self):
         if self.running_task:
-            reward = self.agent.calculate_reward([
-                self.running_task.avg_wait_time,
-                self.running_task.avg_burst_time,
-                self.avg_wait_time,
-                self.avg_burst_time
-            ])
-            if self.last_state and self.last_action != -1 and self.last_action_prob is not None:
-                self.steps.append((self.last_state, reward, self.last_action, self.last_action_prob))
-            if len(self.steps) == 50:
-                if self.queue:
-                    task = self.queue[0]
-                elif self.sleep_queue:
-                    task = self.sleep_queue[0]
-                else:
-                    task = self.running_task
-                self.last_state = [
-                    task.last_wait_time, task.avg_wait_time,
-                    task.last_burst_time, task.avg_burst_time,
-                    task.vruntime, task.sum_exec_runtime,
-                    self.avg_wait_time, self.avg_burst_time
-                ]
-                self.agent.train_for_fifty_epochs(self.steps, self.last_state)
-                self.steps = []
-
-            self.last_state = []
-            self.last_action = -1
-            self.last_action_prob = None
+            if self.rl_enabled and self.test:
+                reward = self.agent.calculate_reward([
+                    self.running_task.avg_wait_time,
+                    self.running_task.avg_burst_time,
+                    self.avg_wait_time,
+                    self.avg_burst_time
+                ])
+                if self.last_state and self.last_action != -1 and self.last_action_prob is not None:
+                    self.steps.append((self.last_state, reward, self.last_action, self.last_action_prob))
+                if len(self.steps) >= 8000:
+                    if self.queue:
+                        task = self.queue[0]
+                    elif self.sleep_queue:
+                        task = self.sleep_queue[0]
+                    else:
+                        task = self.running_task
+                    self.last_state = [
+                        task.last_wait_time, task.avg_wait_time,
+                        task.last_burst_time, task.avg_burst_time,
+                        task.vruntime, task.sum_exec_runtime,
+                        self.avg_wait_time, self.avg_burst_time
+                    ]
+                    self.agent.train_for_ten_epochs(self.steps, self.last_state)
+                    self.steps = []
+                    self.train_count+=1
+                    print("Train Count:", self.train_count)
+                self.last_state = []
+                self.last_action = -1
+                self.last_action_prob = None
             self.running_task.resched = False
-
             burst_length = self.global_tick_time - self.running_task.burst_start_time
             self.running_task.total_burst_time += burst_length
             self.running_task.last_burst_time = burst_length
             self.running_task.avg_burst_time = self.running_task.total_burst_time / max(1, self.running_task.burst_count)
-
             if self.running_task.finished:
+                self.record_turnaround(self.running_task)
                 self.running_task = None
                 return
-
             if self.running_task.sleep_time > 0:
                 self.running_task.sleep_left = self.running_task.sleep_time
                 self.sleep_queue.append(self.running_task)
             else:
                 self.__enqueue_task(self.running_task)
-
             self.running_task = None
 
     def set_task(self, task):
@@ -203,25 +212,26 @@ class Scheduler:
         task.total_wait_time += self.global_tick_time - task.wait_time_before
         task.last_wait_time = self.global_tick_time - task.wait_time_before
         task.avg_wait_time = task.total_wait_time / max(1, task.wait_time_count)
-        if self.last_state == [] and self.last_action == -1:
-            self.last_state = [
-                task.last_wait_time, task.avg_wait_time,
-                task.last_burst_time, task.avg_burst_time,
-                task.vruntime, task.sum_exec_runtime,
-                self.avg_wait_time, self.avg_burst_time
-            ]
-            probs = self.agent.rl_policy_decide(self.last_state)
-            if not np.all(np.isfinite(probs)):
-                probs = np.ones_like(probs, dtype=float) / len(probs)
-            s = probs.sum()
-            if not np.isfinite(s) or s <= 0.0:
-                probs = np.ones_like(probs, dtype=float) / len(probs)
-            else:
-                probs = probs / s
-            action = int(np.random.choice(len(probs), p=probs))
-            self.last_action = action
-            self.last_action_prob = float(probs[action])
-            task.nice = nice_actions[action]
+        if self.rl_enabled:
+            if self.last_state == [] and self.last_action == -1:
+                self.last_state = [
+                    task.last_wait_time, task.avg_wait_time,
+                    task.last_burst_time, task.avg_burst_time,
+                    task.vruntime, task.sum_exec_runtime,
+                    self.avg_wait_time, self.avg_burst_time
+                ]
+                probs = self.agent.rl_policy_decide(self.last_state)
+                if not np.all(np.isfinite(probs)):
+                    probs = np.ones_like(probs, dtype=float) / len(probs)
+                s = probs.sum()
+                if not np.isfinite(s) or s <= 0.0:
+                    probs = np.ones_like(probs, dtype=float) / len(probs)
+                else:
+                    probs = probs / s
+                action = int(np.random.choice(len(probs), p=probs))
+                self.last_action = action
+                self.last_action_prob = float(probs[action])
+                task.nice = nice_actions[action]
         self.running_task = task
         self.running_task.exec_start = self.global_tick_time
         self.running_task.burst_start_time = self.global_tick_time
@@ -230,8 +240,8 @@ class Scheduler:
     def tick(self, workload_gen=None):
         steps = 0
         while True:
-            # if not self.running_task and not self.queue and not self.sleep_queue:
-            #     return True
+            if not self.running_task and not self.queue and not self.sleep_queue:
+                return True
             self.global_tick_time += 1
 
             if workload_gen:
@@ -383,25 +393,19 @@ class WorkloadGenerator:
         self.next_pid += 1
         return self.next_pid
 
+    def generate_batch(self, n):
+        tasks = []
+        for _ in range(int(n)):
+            u = self.rng.rand()
+            if u < self.profile_cdf[0]:
+                t = self._cpu_bound()
+            elif u < self.profile_cdf[1]:
+                t = self._io_bound()
+            elif u < self.profile_cdf[2]:
+                t = self._bursty()
+            else:
+                t = self._background()
+            tasks.append(t)
+            self.spawned_total += 1
+        return tasks
 
-def main():
-    sched = Scheduler()
-
-    task1 = Task(1, 0, 30, 10, total_runtime=2_000)
-    task2 = Task(2, 0, 10, 5,  total_runtime=1_000)
-    task3 = Task(3, 0, 20000000, 0, total_runtime=50_000)
-    sched.enqueue_task(task1)
-    sched.enqueue_task(task2)
-    sched.enqueue_task(task3)
-
-    gen = WorkloadGenerator(seed=999, arrival_prob=0.02, max_active=20, max_total=None, target_active=12)
-
-    EPISODES = 50
-    while True:
-        empty = sched.tick(workload_gen=gen)
-        if empty:
-            break
-
-
-if __name__ == "__main__":
-    main()

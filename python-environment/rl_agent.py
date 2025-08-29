@@ -1,10 +1,11 @@
 import numpy as np
 from policy_nn import PolicyNeuralNet
 from value_function_nn import ValueFunction
+from policy_test import PolicyNeuralNetTest
 
 class RLAgent:
-    def __init__(self):
-        self.policy = PolicyNeuralNet()
+    def __init__(self, test=False):
+        self.policy = PolicyNeuralNet() if test==False else PolicyNeuralNetTest()
         self.value_function = ValueFunction()
 
     def rl_policy_decide(self,state):
@@ -12,13 +13,12 @@ class RLAgent:
         output = self.policy.forward(temp_state)
         return output
 
-    def train_for_fifty_epochs(self, env_params, s_T):
+    def train_for_ten_epochs(self, env_params, s_T):
         states = [t[0] for t in env_params]
         actions = [t[2] for t in env_params]
         old_ps = [t[3] for t in env_params]
         self.value_function.set_v_old(states + [s_T])
-        for i in range(50):
-            print(f"Epochs: {i}")
+        for i in range(10):
             r_t = self.calculate_rt(states, actions, old_ps)
             _, g = self.value_function.update(env_params, r_t)
             self.policy.policy_backprop_step(env_params, g)

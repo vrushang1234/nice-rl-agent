@@ -1,4 +1,5 @@
 import numpy as np
+import os, csv
 
 #ReLU function that outpus max(0, value)
 def ReLU(layer):
@@ -33,6 +34,31 @@ class PolicyNeuralNet:
         z3 = self.w3 @ a2 + self.b3
         a3 = Softmax(z3)
         return a3
+
+    def _save_params_csv(self, path="policy_params.csv"):
+        tmp = path + ".tmp"
+        with open(tmp, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["param", "row", "col", "value"])
+
+            for r in range(self.w1.shape[0]):
+                for c in range(self.w1.shape[1]):
+                    writer.writerow(["w1", r, c, float(self.w1[r, c])])
+            for r in range(self.w2.shape[0]):
+                for c in range(self.w2.shape[1]):
+                    writer.writerow(["w2", r, c, float(self.w2[r, c])])
+            for r in range(self.w3.shape[0]):
+                for c in range(self.w3.shape[1]):
+                    writer.writerow(["w3", r, c, float(self.w3[r, c])])
+
+            for i, v in enumerate(self.b1):
+                writer.writerow(["b1", i, -1, float(v)])
+            for i, v in enumerate(self.b2):
+                writer.writerow(["b2", i, -1, float(v)])
+            for i, v in enumerate(self.b3):
+                writer.writerow(["b3", i, -1, float(v)])
+
+        os.replace(tmp, path)
 
     def policy_backprop_step(self,env_params, g):
         lr = self.LR
@@ -87,4 +113,5 @@ class PolicyNeuralNet:
         self.b2 -= lr * grad_b2
         self.w1 -= lr * grad_w1
         self.b1 -= lr * grad_b1
+        self._save_params_csv()
 
