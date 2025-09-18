@@ -12,7 +12,7 @@ def Softmax(layer):
 
 class PolicyNeuralNet:
     def __init__(self):
-        INPUT_SIZE = 8
+        INPUT_SIZE = 6
         HIDDEN_LAYER_1_SIZE = 50
         HIDDEN_LAYER_2_SIZE = 70
         OUTPUT_SIZE = 11

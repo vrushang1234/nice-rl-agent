@@ -38,5 +38,6 @@ class RLAgent:
         burst_time = 0.1
         avg_wait_time_diff = -0.25
         avg_burst_time_diff = +0.25
-        reward = state[0] * wait_time + state[1] * burst_time + (state[2] - state[0]) * avg_wait_time_diff + (state[3] - state[1]) * avg_burst_time_diff
+        ctx_switch = -0.5
+        reward = state[0] * wait_time + state[1] * burst_time + (state[2] - state[0]) * avg_wait_time_diff + (state[3] - state[1]) * avg_burst_time_diff + ctx_switch * state[4]
         return reward

@@ -8,7 +8,7 @@ def Softmax(layer):
 
 class PolicyNeuralNetTest:
     def __init__(self, csv_path=None):
-        INPUT_SIZE = 8
+        INPUT_SIZE = 6
         HIDDEN_LAYER_1_SIZE = 50
         HIDDEN_LAYER_2_SIZE = 70
         OUTPUT_SIZE = 11

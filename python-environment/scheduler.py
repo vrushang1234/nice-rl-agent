@@ -3,10 +3,11 @@ import numpy as np
 
 from rl_agent import RLAgent
 
-min_slice = 50
-
 nice_actions = [-5,-4,-3,-2,-1,0,1,2,3,4,5]
 
+slice_actions = [70000, 175000, 280000, 385000, 490000, 595000, 700000, 805000, 910000, 1015000, 1120000]
+
+BASE_SLICE = 70000
 nice_weights = {
     -5: 3121,
     -4: 2607,
@@ -21,7 +22,7 @@ nice_weights = {
      5: 335,
 }
 
-BASE_SLICE = 3000
+BASE_SLICE = 700000
 
 
 class Scheduler:
@@ -44,6 +45,7 @@ class Scheduler:
         self.finished_count = 0
         self.rl_enabled = rl_enabled
         self.test = test
+        self.ctx_switches = 0
 
     def record_turnaround(self,task):
         time = task.total_wait_time + task.sum_exec_runtime
@@ -64,7 +66,7 @@ class Scheduler:
     def update_deadline(self, task):
         if task.vruntime - task.deadline < 0:
             return False
-        task.deadline = task.vruntime + self.calc_delta_fair(BASE_SLICE, task)
+        task.deadline = task.vruntime + self.calc_delta_fair(task.slice, task)
         return True
 
     def update_curr(self, task):
@@ -103,7 +105,6 @@ class Scheduler:
             self.last_state = [
                 task.last_wait_time, task.avg_wait_time,
                 task.last_burst_time, task.avg_burst_time,
-                task.vruntime, task.sum_exec_runtime,
                 self.avg_wait_time, self.avg_burst_time
             ]
         if task.deadline == 0:
@@ -140,9 +141,24 @@ class Scheduler:
             self.last_state = [
                 task.last_wait_time, task.avg_wait_time,
                 task.last_burst_time, task.avg_burst_time,
-                task.vruntime, task.sum_exec_runtime,
                 self.avg_wait_time, self.avg_burst_time
             ]
+
+        if self.rl_enabled:
+            probs = self.agent.rl_policy_decide(self.last_state)
+            if not np.all(np.isfinite(probs)):
+                probs = np.ones_like(probs, dtype=float) / len(probs)
+            s = probs.sum()
+            if not np.isfinite(s) or s <= 0.0:
+                probs = np.ones_like(probs, dtype=float) / len(probs)
+            else:
+                probs = probs / s
+            action = int(np.random.choice(len(probs), p=probs))
+            self.last_action = action
+            self.last_action_prob = float(probs[action])
+            task.slice = slice_actions[action]
+            task.deadline = task.vruntime + self.calc_delta_fair(task.slice, task)
+
         task.vruntime = max(task.vruntime, self.min_vruntime)
         heapq.heappush(self.queue, task)
         task.wait_time_before = self.global_tick_time
@@ -161,12 +177,13 @@ class Scheduler:
 
     def put_curr_task(self):
         if self.running_task:
-            if self.rl_enabled and self.test:
+            if self.rl_enabled:
                 reward = self.agent.calculate_reward([
                     self.running_task.avg_wait_time,
                     self.running_task.avg_burst_time,
                     self.avg_wait_time,
-                    self.avg_burst_time
+                    self.avg_burst_time,
+                    self.ctx_switches
                 ])
                 if self.last_state and self.last_action != -1 and self.last_action_prob is not None:
                     self.steps.append((self.last_state, reward, self.last_action, self.last_action_prob))
@@ -180,13 +197,15 @@ class Scheduler:
                     self.last_state = [
                         task.last_wait_time, task.avg_wait_time,
                         task.last_burst_time, task.avg_burst_time,
-                        task.vruntime, task.sum_exec_runtime,
                         self.avg_wait_time, self.avg_burst_time
                     ]
                     self.agent.train_for_ten_epochs(self.steps, self.last_state)
                     self.steps = []
                     self.train_count+=1
                     print("Train Count:", self.train_count)
+                    if(self.train_count >= 50):
+                        print("Training Complete")
+                        exit()
                 self.last_state = []
                 self.last_action = -1
                 self.last_action_prob = None
@@ -212,26 +231,6 @@ class Scheduler:
         task.total_wait_time += self.global_tick_time - task.wait_time_before
         task.last_wait_time = self.global_tick_time - task.wait_time_before
         task.avg_wait_time = task.total_wait_time / max(1, task.wait_time_count)
-        if self.rl_enabled:
-            if self.last_state == [] and self.last_action == -1:
-                self.last_state = [
-                    task.last_wait_time, task.avg_wait_time,
-                    task.last_burst_time, task.avg_burst_time,
-                    task.vruntime, task.sum_exec_runtime,
-                    self.avg_wait_time, self.avg_burst_time
-                ]
-                probs = self.agent.rl_policy_decide(self.last_state)
-                if not np.all(np.isfinite(probs)):
-                    probs = np.ones_like(probs, dtype=float) / len(probs)
-                s = probs.sum()
-                if not np.isfinite(s) or s <= 0.0:
-                    probs = np.ones_like(probs, dtype=float) / len(probs)
-                else:
-                    probs = probs / s
-                action = int(np.random.choice(len(probs), p=probs))
-                self.last_action = action
-                self.last_action_prob = float(probs[action])
-                task.nice = nice_actions[action]
         self.running_task = task
         self.running_task.exec_start = self.global_tick_time
         self.running_task.burst_start_time = self.global_tick_time
@@ -256,15 +255,17 @@ class Scheduler:
                 burst_time = self.global_tick_time - self.running_task.burst_start_time
 
                 should_preempt = (
-                    (self.running_task.resched and burst_time > min_slice) or
+                    (self.running_task.resched) or
                     (burst_time >= self.running_task.max_burst_time) or
-                    (self.queue and self.queue[0].deadline < self.running_task.deadline and burst_time > min_slice) or
+                    (self.queue and self.queue[0].deadline < self.running_task.deadline) or
                     self.running_task.finished
                 )
 
                 if should_preempt:
                     if self.queue:
                         self.set_task(heapq.heappop(self.queue))
+                        self.ctx_switches += 1
+                        self.global_tick_time += 100
                     else:
                         self.put_curr_task()
             else:
@@ -300,6 +301,7 @@ class Task:
         self.exec_start = 0
         self.nice = nice
         self.action = 0
+        self.slice = BASE_SLICE
 
         self.total_runtime = int(total_runtime)
         self.finished = False
@@ -359,34 +361,34 @@ class WorkloadGenerator:
 
     def _cpu_bound(self):
         pid = self._pid()
-        max_burst = int(self.rng.randint(100, 400))
+        max_burst = int(self.rng.randint(2333, 9334))
         sleep = 0
-        total_runtime = int(self.rng.randint(2_000, 8_000))
+        total_runtime = int(self.rng.randint(46666, 186667))
         return Task(pid, 0, max_burst, sleep, total_runtime)
 
     def _io_bound(self):
         pid = self._pid()
-        max_burst = int(self.rng.randint(5, 30))
-        sleep = int(self.rng.randint(20, 200))
-        total_runtime = int(self.rng.randint(500, 3_000))
+        max_burst = int(self.rng.randint(116, 701))
+        sleep = int(self.rng.randint(467, 4667))
+        total_runtime = int(self.rng.randint(11667, 70001))
         return Task(pid, 0, max_burst, sleep, total_runtime)
 
     def _bursty(self):
         pid = self._pid()
         if self.rng.rand() < 0.5:
-            max_burst = int(self.rng.randint(5, 25))
-            sleep = int(self.rng.randint(50, 300))
+            max_burst = int(self.rng.randint(116, 584))
+            sleep = int(self.rng.randint(1167, 7001))
         else:
-            max_burst = int(self.rng.randint(80, 200))
-            sleep = int(self.rng.randint(0, 30))
-        total_runtime = int(self.rng.randint(1_000, 5_000))
+            max_burst = int(self.rng.randint(1867, 4667))
+            sleep = int(self.rng.randint(0, 701))
+        total_runtime = int(self.rng.randint(23334, 116667))
         return Task(pid, 0, max_burst, sleep, total_runtime)
 
     def _background(self):
         pid = self._pid()
-        max_burst = int(self.rng.randint(200, 2_000))
-        sleep = int(self.rng.randint(0, 10))
-        total_runtime = int(self.rng.randint(10_000, 50_000))
+        max_burst = int(self.rng.randint(4667, 46667))
+        sleep = int(self.rng.randint(0, 234))
+        total_runtime = int(self.rng.randint(233334, 1166667))
         return Task(pid, 0, max_burst, sleep, total_runtime)
 
     def _pid(self):
@@ -409,3 +411,22 @@ class WorkloadGenerator:
             self.spawned_total += 1
         return tasks
 
+def main():
+    sched = Scheduler()
+
+    task1 = Task(1, 0, 700, 234, total_runtime=46667)       
+    task2 = Task(2, 0, 234, 117, total_runtime=23334)       
+    task3 = Task(3, 0, 4666667, 0, total_runtime=116667)    
+    sched.enqueue_task(task1)
+    sched.enqueue_task(task2)
+    sched.enqueue_task(task3)
+    gen = WorkloadGenerator(seed=999, arrival_prob=0.02, max_active=20, max_total=None, target_active=12)
+
+    while True:
+        empty = sched.tick(workload_gen=gen)
+        if empty:
+            break
+
+
+if __name__ == "__main__":
+    main()

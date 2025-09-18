@@ -6,7 +6,7 @@ def ReLU(layer):
 
 class ValueFunction:
     def __init__(self):
-        self.INPUT_SIZE = 8
+        self.INPUT_SIZE = 6
         self.HIDDEN_LAYER_SIZE = 20
         self.OUTPUT_SIZE = 1
         self.DISCOUNT_FACTOR = 0.9
