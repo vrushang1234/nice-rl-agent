@@ -12,20 +12,16 @@ def moving_average(data, window=50):
     return np.convolve(data, kernel, mode="valid")
 
 
-def plot_wait_cdf(rl_wait, cfs_wait):
-    rl = np.sort(rl_wait)
-    cfs = np.sort(cfs_wait)
-
+def plot_wait_comparison(rl_wait, cfs_wait, window=50):
     plt.figure()
-    plt.plot(rl, np.linspace(0, 1, len(rl)), label="RL Scheduler")
-    plt.plot(cfs, np.linspace(0, 1, len(cfs)), label="CFS Scheduler")
-    plt.xlabel("Wait Time (ticks)")
-    plt.ylabel("CDF")
-    plt.title("RL vs CFS – Wait Time Distribution (CDF)")
+    plt.plot(moving_average(rl_wait, window), label="RL Scheduler")
+    plt.plot(moving_average(cfs_wait, window), label="CFS Scheduler")
+    plt.xlabel("Scheduling Event Index")
+    plt.ylabel("Wait Time (ticks)")
+    plt.title("RL vs CFS – Smoothed Wait Time")
     plt.legend()
     plt.grid(True)
     plt.show()
-
 
 def plot_turnaround_comparison(rl_turnaround, cfs_turnaround):
     plt.figure()
@@ -95,7 +91,7 @@ def run_ab_test(num_tasks=15, seed=124, runs=10):
     print(f"RL  Mean Wait Time: {np.mean(rl_wait_all):.3f} ticks")
     print(f"CFS Mean Wait Time: {np.mean(cfs_wait_all):.3f} ticks")
 
-    plot_wait_cdf(rl_wait_all, cfs_wait_all)
+    plot_wait_comparison(rl_wait_all, cfs_wait_all, 500)
     plot_turnaround_comparison(rl_turnaround, cfs_turnaround)
 
 

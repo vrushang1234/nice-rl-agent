@@ -572,8 +572,6 @@ def main():
         if empty or sched.training_complete:
             break
 
-    plot_rewards(sched.reward_log)
-    plt.plot(rolling_mean(sched.reward_log, 20))
 
 
 if __name__ == "__main__":
