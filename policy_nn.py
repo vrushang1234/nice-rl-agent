@@ -13,10 +13,10 @@ def Softmax(layer):
 class PolicyNeuralNet:
     def __init__(self):
         INPUT_SIZE = 6
-        HIDDEN_LAYER_1_SIZE = 50
-        HIDDEN_LAYER_2_SIZE = 70
+        HIDDEN_LAYER_1_SIZE = 50 
+        HIDDEN_LAYER_2_SIZE = 70 
         OUTPUT_SIZE = 11
-        self.LR = 0.01
+        self.LR = 3e-4
         self.w1 = np.random.randn(HIDDEN_LAYER_1_SIZE, INPUT_SIZE) * np.sqrt(2.0 / INPUT_SIZE)
         self.b1 = np.zeros(HIDDEN_LAYER_1_SIZE)
         self.w2 = np.random.randn(HIDDEN_LAYER_2_SIZE, HIDDEN_LAYER_1_SIZE) * np.sqrt(2.0 / HIDDEN_LAYER_1_SIZE)
@@ -60,21 +60,37 @@ class PolicyNeuralNet:
 
         os.replace(tmp, path)
 
-    def policy_backprop_step(self,env_params, g):
+    def policy_backprop_step(self, env_params, advantages, ratios, eps=0.2):
         lr = self.LR
-        states = np.asarray([state[0] for state in env_params])
-        actions = np.asarray([state[2] for state in env_params])
+
+        states = np.asarray([t[0] for t in env_params])
+        actions = np.asarray([t[2] for t in env_params])
+        A = np.asarray(advantages, dtype=np.float64)
+        r = np.asarray(ratios, dtype=np.float64)
+
         T = states.shape[0]
-        Z1 = states @ self.w1.T + self.b1          
+
+        # PPO clipped objective coefficient
+        clipped_r = np.clip(r, 1.0 - eps, 1.0 + eps)
+        coeff = np.where(A >= 0, np.minimum(r, clipped_r), np.maximum(r, clipped_r))
+        g = coeff * A           # g_t = dL/d(log π)
+
+        # ----- Forward pass (batched) -----
+        Z1 = states @ self.w1.T + self.b1
         A1 = np.tanh(Z1)
+
         Z2 = A1 @ self.w2.T + self.b2
         A2 = np.tanh(Z2)
+
         Z3 = A2 @ self.w3.T + self.b3
+        Z3 -= np.max(Z3, axis=1, keepdims=True)
 
-        m = np.max(Z3, axis=1, keepdims=True)
-        P = np.exp(Z3 - m)
+        P = np.exp(Z3)
         P /= (P.sum(axis=1, keepdims=True) + 1e-8)
+        entropy = -np.sum(P * np.log(P + 1e-8), axis=1)
+        g += 0.01 * entropy
 
+        # ----- Policy gradient -----
         Gz3 = (-g)[:, None] * P
         Gz3[np.arange(T), actions] += g
 
@@ -82,29 +98,30 @@ class PolicyNeuralNet:
         grad_b3 = Gz3.sum(axis=0)
 
         Ga2 = Gz3 @ self.w3
-        Gz2 = Ga2 * (1.0 - np.tanh(Z2) ** 2)
+        Gz2 = Ga2 * (1.0 - A2 ** 2)
 
         grad_w2 = Gz2.T @ A1
         grad_b2 = Gz2.sum(axis=0)
 
         Ga1 = Gz2 @ self.w2
-        Gz1 = Ga1 * (1.0 - np.tanh(Z1) ** 2)
+        Gz1 = Ga1 * (1.0 - A1 ** 2)
 
         grad_w1 = Gz1.T @ states
         grad_b1 = Gz1.sum(axis=0)
 
+        # Normalize
+        grad_w1 /= T; grad_b1 /= T
+        grad_w2 /= T; grad_b2 /= T
+        grad_w3 /= T; grad_b3 /= T
 
-        def clip_(arr, max_norm=5.0):
-            n = np.linalg.norm(arr)
+        # Gradient clipping
+        def clip_(x, max_norm=5.0):
+            n = np.linalg.norm(x)
             if np.isfinite(n) and n > max_norm:
-                arr *= (max_norm / (n + 1e-8))
+                x *= max_norm / (n + 1e-8)
 
-        clip_(grad_w1)
-        clip_(grad_b1)
-        clip_(grad_w2)
-        clip_(grad_b2)
-        clip_(grad_w3)
-        clip_(grad_b3)
+        for g_ in [grad_w1, grad_b1, grad_w2, grad_b2, grad_w3, grad_b3]:
+            clip_(g_)
 
         # SGD update
         self.w3 -= lr * grad_w3
@@ -113,5 +130,7 @@ class PolicyNeuralNet:
         self.b2 -= lr * grad_b2
         self.w1 -= lr * grad_w1
         self.b1 -= lr * grad_b1
+
         self._save_params_csv()
+
 

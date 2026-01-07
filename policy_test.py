@@ -9,11 +9,11 @@ def Softmax(layer):
 class PolicyNeuralNetTest:
     def __init__(self, csv_path=None):
         INPUT_SIZE = 6
-        HIDDEN_LAYER_1_SIZE = 50
-        HIDDEN_LAYER_2_SIZE = 70
+        HIDDEN_LAYER_1_SIZE = 50 
+        HIDDEN_LAYER_2_SIZE = 70 
         OUTPUT_SIZE = 11
 
-        self.LR = 0.01
+        self.LR = 3e-4 
         self.w1 = np.random.randn(HIDDEN_LAYER_1_SIZE, INPUT_SIZE) * np.sqrt(2.0 / INPUT_SIZE)
         self.b1 = np.zeros(HIDDEN_LAYER_1_SIZE)
         self.w2 = np.random.randn(HIDDEN_LAYER_2_SIZE, HIDDEN_LAYER_1_SIZE) * np.sqrt(2.0 / HIDDEN_LAYER_1_SIZE)
